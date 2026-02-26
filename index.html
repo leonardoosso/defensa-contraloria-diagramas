@@ -424,9 +424,6 @@
     border-radius: 12px;
     padding: 32px 24px;
     overflow: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     margin-bottom: 24px;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
@@ -437,8 +434,10 @@
   .mermaid-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
   .mermaid-wrap .mermaid {
-    transition: transform 0.2s ease;
-    transform-origin: center center;
+    display: block;
+    margin: 0 auto;
+    width: fit-content;
+    transition: width 0.2s ease, height 0.2s ease;
   }
 
   .zoom-controls {
@@ -472,8 +471,7 @@
     background: var(--border);
     color: var(--text);
   }
-  .mermaid-wrap.is-zoomed { cursor: grab; }
-  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+  .mermaid-wrap.is-zoomed { cursor: default; }
 
   /* ============ MERMAID SVG OVERRIDES ============ */
   .mermaid .nodeLabel {
@@ -1888,30 +1886,63 @@ mindmap
 
 <!-- ============ ZOOM CONTROLS ============ -->
 <script>
-  function updateZoomState(wrap) {
+  /* Zoom by resizing SVG (not transform) so overflow:auto scrollbars work */
+  function getOrigDims(svg) {
+    if (!svg._origW) {
+      var vb = svg.getAttribute('viewBox');
+      if (vb) {
+        var p = vb.split(/[\s,]+/);
+        svg._origW = parseFloat(p[2]);
+        svg._origH = parseFloat(p[3]);
+      } else {
+        var r = svg.getBoundingClientRect();
+        svg._origW = r.width;
+        svg._origH = r.height;
+      }
+    }
+    return { w: svg._origW, h: svg._origH };
+  }
+
+  function applyZoom(wrap, next) {
     var target = wrap.querySelector('.mermaid');
-    var zoom = parseFloat(target.dataset.zoom || '1');
-    wrap.classList.toggle('is-zoomed', zoom > 1);
+    var svg = target ? target.querySelector('svg') : null;
+    if (!svg) return;
+
+    next = Math.min(Math.max(next, 0.3), 5);
+    target.dataset.zoom = next;
+
+    var d = getOrigDims(svg);
+    if (next <= 1) {
+      /* At 1x or below: let SVG be responsive (width 100%, max-width) */
+      svg.style.width = '';
+      svg.style.height = '';
+      svg.style.maxWidth = '';
+      target.style.transform = '';
+      target.style.margin = '0 auto';
+    } else {
+      /* Zoomed in: set explicit pixel dimensions → creates scrollable area */
+      svg.style.width = (d.w * next) + 'px';
+      svg.style.height = (d.h * next) + 'px';
+      svg.style.maxWidth = 'none';
+      target.style.transform = '';
+      target.style.margin = '0';
+    }
+    wrap.classList.toggle('is-zoomed', next > 1);
   }
 
   function zoomDiagram(btn, factor) {
     var wrap = btn.closest('.mermaid-wrap');
     var target = wrap.querySelector('.mermaid');
     var current = parseFloat(target.dataset.zoom || '1');
-    var next = Math.min(Math.max(current * factor, 0.3), 5);
-    target.dataset.zoom = next;
-    target.style.transform = 'scale(' + next + ')';
-    updateZoomState(wrap);
+    applyZoom(wrap, current * factor);
   }
 
   function resetZoom(btn) {
     var wrap = btn.closest('.mermaid-wrap');
-    var target = wrap.querySelector('.mermaid');
-    target.dataset.zoom = '1';
-    target.style.transform = 'scale(1)';
-    updateZoomState(wrap);
+    applyZoom(wrap, 1);
   }
 
+  /* Ctrl+wheel zoom */
   document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
     wrap.addEventListener('wheel', function(e) {
       if (!e.ctrlKey && !e.metaKey) return;
@@ -1919,31 +1950,14 @@ mindmap
       var target = wrap.querySelector('.mermaid');
       var current = parseFloat(target.dataset.zoom || '1');
       var factor = e.deltaY < 0 ? 1.1 : 0.9;
-      var next = Math.min(Math.max(current * factor, 0.3), 5);
-      target.dataset.zoom = next;
-      target.style.transform = 'scale(' + next + ')';
-      updateZoomState(wrap);
+      applyZoom(wrap, current * factor);
     }, { passive: false });
+  });
 
-    var startX, startY, scrollL, scrollT;
-    wrap.addEventListener('mousedown', function(e) {
-      if (e.target.closest('.zoom-controls')) return;
-      var target = wrap.querySelector('.mermaid');
-      if (parseFloat(target.dataset.zoom || '1') <= 1) return;
-      wrap.classList.add('is-panning');
-      startX = e.clientX;
-      startY = e.clientY;
-      scrollL = wrap.scrollLeft;
-      scrollT = wrap.scrollTop;
-    });
-    window.addEventListener('mousemove', function(e) {
-      if (!wrap.classList.contains('is-panning')) return;
-      wrap.scrollLeft = scrollL - (e.clientX - startX);
-      wrap.scrollTop = scrollT - (e.clientY - startY);
-    });
-    window.addEventListener('mouseup', function() {
-      wrap.classList.remove('is-panning');
-    });
+  /* Reset any stale transform/zoom from previous sessions */
+  document.querySelectorAll('.mermaid-wrap .mermaid').forEach(function(el) {
+    el.style.transform = '';
+    el.dataset.zoom = '1';
   });
 </script>
 
